@@ -9,7 +9,6 @@ STRINGS: dict[str, str] = {
     "keyboard.menu_rial": "مشاهده آگهی‌ها",
     "keyboard.menu_fx": "ثبت آگهی برای فروش یورو/دلار",
     "keyboard.menu_spot_rates": "قیمت لحظه‌ای دلار و یورو (ریال)",
-    "keyboard.menu_rates": "محاسبهٔ معادل ریالی",
     "keyboard.menu_my_offers": "مدیریت آگهی‌های من (حذف)",
     "keyboard.menu_delete_account": "حذف اکانت",
     # Membership & channel
@@ -24,35 +23,11 @@ STRINGS: dict[str, str] = {
     ),
     "channel.btn_join": "ورود به کانال",
     "channel.btn_open": "مشاهدهٔ کانال",
-    # Live TGJU-based USD/EUR → rial (margani/pricedb JSON)
-    "rates.amount_prompt_html": (
-        "برای محاسبهٔ تقریبی معادل <b>ریالی</b> با همان نرخ‌های بالا، "
-        "مبلغ ارز را فقط با ارقام انگلیسی ۰–۹ بفرستید (مثال: 100).\n\n"
-        "برای لغو: /cancel"
-    ),
-    "rates.amount_invalid": (
-        "عدد نامعتبر است. فقط ارقام انگلیسی بدون فاصله و بدون نقطه بفرستید."
-    ),
-    "rates.pick_currency": "این مبلغ مربوط به کدام ارز است؟",
-    "rates.pick_currency_reminder": "لطفاً با یکی از دو دکمهٔ زیر ارز را انتخاب کنید.",
-    "rates.btn_usd": "دلار USD",
-    "rates.btn_eur": "یورو EUR",
-    "rates.result_html": (
-        "تقریب معادل ریالی:\n\n"
-        "<b>{amount:,}</b> {ccy_fa} ({code}) × نرخ هر واحد <b>{rate:,}</b> ریال "
-        "≈ <b>{total:,}</b> ریال\n\n"
-        "<i>این عدد با همان نرخ‌های ابتدای این گفتگو محاسبه شده؛ "
-        "برای معاملهٔ واقعی حتماً منابع معتبر را هم بررسی کنید.</i>"
-    ),
+    # Live TGJU-based USD/EUR → rial (spot button + channel listing callback)
     "rates.unavailable_html": (
         "<b>نرخ فعلاً در دسترس نیست.</b>\n\n"
         "اتصال به منبع قیمت برقرار نشد؛ بعداً دوباره همین گزینه را از منو بزنید."
     ),
-    "rates.rate_missing_for_ccy": (
-        "نرخ این ارز ({ccy}) در آخرین بارگذاری نبود؛ ارز دیگر را امتحان کنید یا از منو دوباره شروع کنید."
-    ),
-    "rates.session_lost": "جلسهٔ محاسبه قطع شد. از منوی اصلی دوباره شروع کنید.",
-    "rates.cancelled": "محاسبه لغو شد.",
     "rates.listing_rial_gone": "این آگهی دیگر در ربات ثبت نیست.",
     "rates.listing_rial_no_rate": "الان نرخ دلار/یورو به‌روز نیست؛ بعداً دوباره بزنید.",
     "rates.listing_rial_alert": (
@@ -62,8 +37,8 @@ STRINGS: dict[str, str] = {
         "فقط راهنما؛ قبل از معامله منابع معتبر را چک کنید."
     ),
     "rates.spot_footer_html": (
-        "<i>همین متن به‌صورت دوره‌ای در <b>کانال آگهی‌ها</b> هم به‌روز می‌شود و در صورت دسترسی ربات، "
-        "پیام آن پین است. برای تبدیل یک مبلغ مشخص به ریال، گزینهٔ «محاسبهٔ معادل ریالی» را بزنید.</i>"
+        "<i>برای معادل تقریبی ریالی هر آگهی، در <b>کانال</b> زیر همان پیام دکمهٔ "
+        "«≈ معادل ریالی» را بزنید.</i>"
     ),
     "listings.cta_html": (
         "<b>لیست فروشندگان ارز</b>\n\n"

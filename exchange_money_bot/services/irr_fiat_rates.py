@@ -88,7 +88,10 @@ def format_buyer_rates_banner_html(
     eur_rial: Optional[int],
     updated_ts: Optional[str],
 ) -> str:
-    """Return Telegram-HTML snippet: Farsi disclaimer/source block plus optional USD/EUR lines."""
+    """Return Telegram-HTML: USD/EUR lines first, optional source timestamp, then disclaimer (URLs).
+
+    Use ``disable_web_page_preview=True`` when sending so Telegram does not show link previews.
+    """
     price_lines: list[str] = []
     if usd_rial is not None:
         price_lines.append(f"هر دلار: <b>{usd_rial:,}</b> ریال")
@@ -97,22 +100,20 @@ def format_buyer_rates_banner_html(
     if not price_lines:
         return ""
 
-    # Above figures: source + disclaimer (fixed copy; user-facing Persian in HTML strings below).
-    intro = (
+    disclaimer = (
         "<b>راهنمای نرخ تقریبی (ریال)</b>\n"
-        "<i>قیمت‌های این ربات از فایل‌های JSON عمومی مخزن "
+        "<i>قیمت‌های این ربات از  "
         '<a href="https://github.com/margani/pricedb">margani/pricedb</a>'
         " خوانده می‌شوند و فقط برای نمایش سریع هستند.</i>\n"
-        "<i>برای معامله، حتماً نرخ روز را از منابع معتبر هم بررسی کنید؛ "
+        "<i>برای معامله، حتماً نرخ روز را از منابع دیگر هم بررسی کنید؛ "
         'مثلاً <a href="https://bonbast.com">بن‌بست (Bonbast)</a>'
         " را پیش از سفارش یا خرید ببینید.</i>\n"
-        "<i>این ربات فقط واسط بین کاربران است و مسئولیتی در قبال قیمت‌ها، "
-        "انجام معامله، صحت اطلاعات کاربران یا هرگونه ضمانت و وریفای ندارد.</i>"
     )
     body = "\n".join(price_lines)
-    out = intro + "\n\n" + body
+    out = body
     if updated_ts:
         out += "\n<i>زمان ثبت در منبع: " + html.escape(updated_ts, quote=False) + "</i>"
+    out += "\n\n" + disclaimer
     return out
 
 

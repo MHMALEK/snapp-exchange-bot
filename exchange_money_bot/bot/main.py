@@ -1,4 +1,3 @@
-import asyncio
 import html
 import logging
 import re
@@ -13,7 +12,6 @@ from exchange_money_bot.bot.keyboards import (
     main_menu_keyboard,
     with_back_to_main,
 )
-from exchange_money_bot.bot.rates_flow import build_rates_conversation_handler
 from exchange_money_bot.bot.sell_flow import build_sell_conversation_handler
 from exchange_money_bot.config import settings
 from exchange_money_bot.database import async_session_factory, init_db
@@ -33,6 +31,7 @@ async def _edit_or_reply(
     *,
     reply_markup=None,
     parse_mode: Optional[str] = None,
+    disable_web_page_preview: bool = False,
 ) -> None:
     """Edit the message that carried the callback; fall back to a new reply if edit fails."""
     try:
@@ -40,12 +39,14 @@ async def _edit_or_reply(
             text,
             reply_markup=reply_markup,
             parse_mode=parse_mode,
+            disable_web_page_preview=disable_web_page_preview,
         )
     except Exception:
         await message.reply_text(
             text,
             reply_markup=reply_markup,
             parse_mode=parse_mode,
+            disable_web_page_preview=disable_web_page_preview,
         )
 
 
@@ -175,7 +176,7 @@ async def listing_rial_callback(
 async def rates_spot_callback(
     update: Update, context: ContextTypes.DEFAULT_TYPE
 ) -> None:
-    """Live USD/EUR per-unit rial (same copy as the pinned channel post when enabled)."""
+    """Live USD/EUR per-unit rial banner (TGJU JSON via margani/pricedb)."""
     query = update.callback_query
     if query is None or query.message is None or query.from_user is None:
         return
@@ -218,6 +219,7 @@ async def rates_spot_callback(
             t("rates.unavailable_html"),
             parse_mode="HTML",
             reply_markup=with_back_to_main(InlineKeyboardMarkup([])),
+            disable_web_page_preview=True,
         )
         return
     await _edit_or_reply(
@@ -225,6 +227,7 @@ async def rates_spot_callback(
         banner + "\n\n" + t("rates.spot_footer_html"),
         parse_mode="HTML",
         reply_markup=with_back_to_main(InlineKeyboardMarkup([])),
+        disable_web_page_preview=True,
     )
 
 
@@ -682,23 +685,8 @@ async def delete_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         await update.message.reply_text(t("account.nothing_stored"))
 
 
-async def _channel_rates_pin_loop(application: Application) -> None:
-    await asyncio.sleep(20)
-    while True:
-        try:
-            await telegram_channel_service.refresh_channel_pinned_rates(application.bot)
-        except Exception:
-            logger.exception("channel_rates_pin_loop iteration failed")
-        await asyncio.sleep(max(120, int(settings.irr_channel_pin_interval_seconds)))
-
-
-async def on_post_init(application: Application) -> None:
+async def on_post_init(_application: Application) -> None:
     await init_db()
-    if settings.irr_channel_pin_enabled and (settings.telegram_listings_channel_id or "").strip():
-        application.create_task(
-            _channel_rates_pin_loop(application),
-            name="channel_rates_pin_loop",
-        )
 
 
 def main() -> None:
@@ -739,7 +727,6 @@ def main() -> None:
         )
     )
     application.add_handler(build_sell_conversation_handler())
-    application.add_handler(build_rates_conversation_handler())
     application.add_handler(
         CallbackQueryHandler(menu_main_callback, pattern=rf"^{MENU_MAIN_CALLBACK}$")
     )

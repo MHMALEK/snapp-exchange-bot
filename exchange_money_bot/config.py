@@ -34,12 +34,6 @@ class Settings(BaseSettings):
     irr_eur_json_url: Optional[str] = None
     """Override EUR JSON URL; default is margani/pricedb TGJU mirror."""
 
-    irr_channel_pin_enabled: bool = True
-    """Post/edit a pinned USD/EUR→rial message in TELEGRAM_LISTINGS_CHANNEL_ID when set."""
-
-    irr_channel_pin_interval_seconds: int = 600
-    """How often to refresh the pinned channel rates message (background task)."""
-
     def effective_membership_channel_id(self) -> Optional[str]:
         return self.telegram_membership_channel_id or self.telegram_listings_channel_id
 
