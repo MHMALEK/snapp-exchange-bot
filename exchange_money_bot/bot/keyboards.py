@@ -1,6 +1,6 @@
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
-from exchange_money_bot.config import settings
+from exchange_money_bot.i18n import t
 
 # Callback for "back to main menu" — must match ConversationHandler fallback in sell_flow.
 MENU_MAIN_CALLBACK = "menu:main"
@@ -12,7 +12,7 @@ def with_back_to_main(markup: InlineKeyboardMarkup) -> InlineKeyboardMarkup:
     rows.append(
         [
             InlineKeyboardButton(
-                "بازگشت به منوی اصلی",
+                t("keyboard.back_main"),
                 callback_data=MENU_MAIN_CALLBACK,
             )
         ]
@@ -20,44 +20,23 @@ def with_back_to_main(markup: InlineKeyboardMarkup) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(rows)
 
 
-def buyer_currency_pick_keyboard() -> InlineKeyboardMarkup:
-    """Inline keyboard before buyer catalog: pick EUR or USD."""
-    return with_back_to_main(
-        InlineKeyboardMarkup(
-            [
-                [InlineKeyboardButton("یورو (EUR)", callback_data="buy:ccy:EUR")],
-                [InlineKeyboardButton("دلار (USD)", callback_data="buy:ccy:USD")],
-            ]
-        )
-    )
-
-
 def main_menu_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         [
+            [InlineKeyboardButton(t("keyboard.menu_rial"), callback_data="start:rial")],
+            [InlineKeyboardButton(t("keyboard.menu_fx"), callback_data="start:1")],
+            [InlineKeyboardButton(t("keyboard.menu_list_ads"), callback_data="start:2")],
             [
                 InlineKeyboardButton(
-                    settings.start_button_1_text,
-                    callback_data="start:1",
-                ),
-            ],
-            [
-                InlineKeyboardButton(
-                    settings.start_button_2_text,
-                    callback_data="start:2",
-                ),
-            ],
-            [
-                InlineKeyboardButton(
-                    "آگهی‌های من",
+                    t("keyboard.menu_my_offers"),
                     callback_data="account:manage",
-                ),
+                )
             ],
             [
                 InlineKeyboardButton(
-                    "حذف داده‌های من",
+                    t("keyboard.menu_delete_account"),
                     callback_data="account:delete",
-                ),
+                )
             ],
         ]
     )

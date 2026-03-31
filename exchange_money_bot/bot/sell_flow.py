@@ -20,8 +20,11 @@ from exchange_money_bot.bot.keyboards import (
     main_menu_keyboard,
     with_back_to_main,
 )
+from exchange_money_bot.config import settings
 from exchange_money_bot.database import async_session_factory
+from exchange_money_bot.i18n import t
 from exchange_money_bot.services import sell_offers as sell_offers_service
+from exchange_money_bot.services import telegram_channel as telegram_channel_service
 from exchange_money_bot.services import users as user_service
 
 logger = logging.getLogger(__name__)
@@ -50,8 +53,8 @@ def _currency_keyboard() -> InlineKeyboardMarkup:
     return with_back_to_main(
         InlineKeyboardMarkup(
             [
-                [InlineKeyboardButton("یورو (EUR)", callback_data="sell:ccy:EUR")],
-                [InlineKeyboardButton("دلار (USD)", callback_data="sell:ccy:USD")],
+                [InlineKeyboardButton(t("sell.btn_eur"), callback_data="sell:ccy:EUR")],
+                [InlineKeyboardButton(t("sell.btn_usd"), callback_data="sell:ccy:USD")],
             ]
         )
     )
@@ -62,8 +65,8 @@ def _confirm_keyboard() -> InlineKeyboardMarkup:
         InlineKeyboardMarkup(
             [
                 [
-                    InlineKeyboardButton("تایید و ثبت", callback_data="sell:submit"),
-                    InlineKeyboardButton("انصراف", callback_data="sell:abort"),
+                    InlineKeyboardButton(t("sell.btn_submit"), callback_data="sell:submit"),
+                    InlineKeyboardButton(t("sell.btn_abort"), callback_data="sell:abort"),
                 ],
             ]
         )
@@ -78,15 +81,24 @@ async def sell_entry(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     async with async_session_factory() as session:
         registered = await user_service.get_user_by_telegram(session, query.from_user.id)
     if registered is None:
-        await query.message.reply_text("برای فروش ارز ابتدا با /start ثبت‌نام کنید.")
+        await query.message.reply_text(t("sell.register_first"))
+        return ConversationHandler.END
+    if not await telegram_channel_service.user_passes_membership_gate(
+        context.bot, query.from_user.id
+    ):
+        await query.message.reply_text(
+            t("membership.sell_gate_html"),
+            parse_mode="HTML",
+            reply_markup=with_back_to_main(
+                telegram_channel_service.join_channel_keyboard()
+                or InlineKeyboardMarkup([])
+            ),
+        )
         return ConversationHandler.END
     context.user_data.pop("sell_amount", None)
     context.user_data.pop("sell_currency", None)
     await query.message.reply_text(
-        "مبلغی را که می‌خواهید بفروشید وارد کنید.\n\n"
-        "فقط با اعداد انگلیسی (0 تا 9)، بدون فاصله، ویرگول یا نقطه.\n"
-        "مثال: 100 یا 1000 یا 150\n\n"
-        "برای لغو این فرم: /cancel",
+        t("sell.amount_prompt"),
         reply_markup=with_back_to_main(InlineKeyboardMarkup([])),
     )
     return SELL_AMOUNT
@@ -99,13 +111,13 @@ async def sell_receive_amount(update: Update, context: ContextTypes.DEFAULT_TYPE
     amount = _parse_integer_amount(text)
     if amount is None:
         await update.message.reply_text(
-            "عدد نامعتبر است. فقط ارقام انگلیسی 0-9، بدون فاصله و بدون نقطه. دوباره بفرستید.",
+            t("sell.amount_invalid"),
             reply_markup=with_back_to_main(InlineKeyboardMarkup([])),
         )
         return SELL_AMOUNT
     context.user_data["sell_amount"] = amount
     await update.message.reply_text(
-        "ارز را انتخاب کنید:",
+        t("sell.pick_currency"),
         reply_markup=_currency_keyboard(),
     )
     return SELL_CURRENCY
@@ -114,7 +126,7 @@ async def sell_receive_amount(update: Update, context: ContextTypes.DEFAULT_TYPE
 async def sell_currency_reminder(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     if update.message:
         await update.message.reply_text(
-            "لطفاً با یکی از دکمه‌ها، ارز را انتخاب کنید.",
+            t("sell.currency_reminder"),
             reply_markup=_currency_keyboard(),
         )
     return SELL_CURRENCY
@@ -135,20 +147,23 @@ async def sell_currency_chosen(update: Update, context: ContextTypes.DEFAULT_TYP
     amount = context.user_data.get("sell_amount")
     if not isinstance(amount, int):
         await query.message.reply_text(
-            "خطا: مبلغ ذخیره نشد. دوباره از منو «فروش» را بزنید.",
+            t("error.amount_lost"),
             reply_markup=main_menu_keyboard(),
         )
         context.user_data.clear()
         return ConversationHandler.END
-    display_name = query.from_user.full_name or "—"
-    uname = f"@{query.from_user.username}" if query.from_user.username else "ندارد"
-    summary = (
-        "خلاصهٔ آگهی فروش:\n\n"
-        f"مبلغ: {amount}\n"
-        f"ارز: {_currency_label(code)}\n"
-        f"نام نمایشی: {display_name}\n"
-        f"یوزرنیم تلگرام: {uname}\n\n"
-        "اگر درست است «تایید و ثبت» را بزنید؛ وگرنه «انصراف»."
+    display_name = query.from_user.full_name or t("sell.display_fallback")
+    uname = (
+        f"@{query.from_user.username}"
+        if query.from_user.username
+        else t("sell.username_none")
+    )
+    summary = t(
+        "sell.summary",
+        amount=amount,
+        currency_label=_currency_label(code),
+        display_name=display_name,
+        uname=uname,
     )
     await query.message.reply_text(summary, reply_markup=_confirm_keyboard())
     return SELL_CONFIRM
@@ -157,7 +172,7 @@ async def sell_currency_chosen(update: Update, context: ContextTypes.DEFAULT_TYP
 async def sell_confirm_reminder(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     if update.message:
         await update.message.reply_text(
-            "لطفاً با دکمهٔ «تایید و ثبت» یا «انصراف» پاسخ دهید.",
+            t("sell.confirm_reminder"),
             reply_markup=_confirm_keyboard(),
         )
     return SELL_CONFIRM
@@ -171,7 +186,7 @@ async def sell_submit_or_abort(update: Update, context: ContextTypes.DEFAULT_TYP
     if query.data == "sell:abort":
         context.user_data.clear()
         await query.message.reply_text(
-            "ثبت آگهی لغو شد.\nیکی از گزینه‌های منو را انتخاب کنید:",
+            t("sell.aborted"),
             reply_markup=main_menu_keyboard(),
         )
         return ConversationHandler.END
@@ -181,7 +196,7 @@ async def sell_submit_or_abort(update: Update, context: ContextTypes.DEFAULT_TYP
     currency = context.user_data.get("sell_currency")
     if not isinstance(amount, int) or not isinstance(currency, str):
         await query.message.reply_text(
-            "خطا در داده‌ها. دوباره از منو شروع کنید.",
+            t("error.data_lost"),
             reply_markup=main_menu_keyboard(),
         )
         context.user_data.clear()
@@ -191,14 +206,14 @@ async def sell_submit_or_abort(update: Update, context: ContextTypes.DEFAULT_TYP
         db_user = await user_service.get_user_by_telegram(session, u.id)
         if db_user is None:
             await query.message.reply_text(
-                "کاربر یافت نشد. /start را بزنید.",
+                t("error.user_not_found"),
                 reply_markup=main_menu_keyboard(),
             )
             context.user_data.clear()
             return ConversationHandler.END
         display_name = u.full_name or (db_user.first_name or "—")
         try:
-            await sell_offers_service.create_sell_offer(
+            offer = await sell_offers_service.create_sell_offer(
                 session,
                 user_id=db_user.id,
                 telegram_id=u.id,
@@ -210,17 +225,33 @@ async def sell_submit_or_abort(update: Update, context: ContextTypes.DEFAULT_TYP
         except ValueError as e:
             logger.warning("sell offer validation: %s", e)
             await query.message.reply_text(
-                "ذخیره نشد. دوباره تلاش کنید.",
+                t("error.offer_save"),
                 reply_markup=main_menu_keyboard(),
             )
             context.user_data.clear()
             return ConversationHandler.END
+    listing_mid = await telegram_channel_service.post_offer_to_listings_channel(
+        context.bot, offer
+    )
+    if listing_mid is not None:
+        async with async_session_factory() as session:
+            await sell_offers_service.set_listings_channel_message_id(
+                session, offer.id, listing_mid
+            )
     context.user_data.clear()
+    if settings.telegram_listings_channel_id:
+        channel_note = t("sell.success_channel_on_html")
+    else:
+        channel_note = t("sell.success_channel_off")
     await query.message.reply_text(
-        "ثبت شما انجام شد.\n"
-        f"مبلغ {amount} {_currency_label(currency)} برای فروش در فهرست فروشندگان نمایش داده می‌شود.\n"
-        "اگر کسی مایل به خرید باشد، با شما تماس می‌گیرد.",
+        t(
+            "sell.success_intro",
+            amount=amount,
+            currency_label=_currency_label(currency),
+            channel_note=channel_note,
+        ),
         reply_markup=main_menu_keyboard(),
+        parse_mode="HTML",
     )
     return ConversationHandler.END
 
@@ -230,7 +261,7 @@ async def sell_conversation_cancel(update: Update, context: ContextTypes.DEFAULT
     context.user_data.pop("sell_currency", None)
     if update.message:
         await update.message.reply_text(
-            "فرم فروش لغو شد. از منوی زیر ادامه دهید:",
+            t("sell.cancelled_cmd"),
             reply_markup=main_menu_keyboard(),
         )
     return ConversationHandler.END
@@ -245,7 +276,7 @@ async def sell_buy_flow_fallback(update: Update, context: ContextTypes.DEFAULT_T
     context.user_data.pop("sell_currency", None)
     from exchange_money_bot.bot.main import execute_buy_flow_callback
 
-    await execute_buy_flow_callback(query)
+    await execute_buy_flow_callback(query, context.bot)
     return ConversationHandler.END
 
 
@@ -258,7 +289,7 @@ async def sell_menu_main(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     context.user_data.pop("sell_currency", None)
     from exchange_money_bot.bot.main import apply_home_screen
 
-    await apply_home_screen(query)
+    await apply_home_screen(query, context.bot)
     return ConversationHandler.END
 
 
