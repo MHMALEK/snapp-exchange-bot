@@ -92,8 +92,8 @@ def _confirm_keyboard() -> InlineKeyboardMarkup:
         InlineKeyboardMarkup(
             [
                 [
-                    InlineKeyboardButton(t("sell.btn_submit"), callback_data="sell:submit"),
                     InlineKeyboardButton(t("sell.btn_abort"), callback_data="sell:abort"),
+                    InlineKeyboardButton(t("sell.btn_submit"), callback_data="sell:submit"),
                 ],
             ]
         )
