@@ -1,13 +1,13 @@
 # Build, push to GHCR (public), deploy to Oracle VM over SSH.
 #
-# GitHub → Settings → Secrets and variables → Actions:
-#   VM_HOST      — VM IP or hostname (e.g. 134.x.x.x)
-#   VM_USER      — SSH user (e.g. ubuntu)
-#   VM_SSH_KEY   — Private key (full PEM, including -----BEGIN ... END-----)
+# Secrets → Settings → Secrets and variables → Actions:
+#   VM_HOST, VM_USER, VM_SSH_KEY
+#   TELEGRAM_BOT_TOKEN, DATABASE_URL, TELEGRAM_LISTINGS_CHANNEL_ID
 #
-# On the VM (once): mkdir -p /home/ubuntu/exchange-money-bot
-#                   place .env at the path in VM_ENV_FILE_PATH below
-# After first push: Packages → exchange-money-bot → Package settings → Change visibility → Public
+# Env vars are passed through the SSH session into `docker run -e NAME` (no secrets
+# embedded in the script text, so URLs and special characters stay safe).
+#
+# After first push: Packages → image → Package settings → Change visibility → Public
 #
 name: Build and deploy
 
@@ -22,8 +22,6 @@ concurrency:
 
 env:
   REGISTRY: ghcr.io
-  # Path to .env on the VM (edit if yours differs)
-  VM_ENV_FILE_PATH: /home/ubuntu/exchange-money-bot/.env
 
 jobs:
   build-and-deploy:
@@ -55,22 +53,34 @@ jobs:
             ${{ env.IMAGE_NAME }}:${{ github.sha }}
 
       - name: Deploy on VM
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          TELEGRAM_LISTINGS_CHANNEL_ID: ${{ secrets.TELEGRAM_LISTINGS_CHANNEL_ID }}
         uses: appleboy/ssh-action@v1.2.0
         with:
           host: ${{ secrets.VM_HOST }}
           username: ${{ secrets.VM_USER }}
           key: ${{ secrets.VM_SSH_KEY }}
+          envs: TELEGRAM_BOT_TOKEN,DATABASE_URL,TELEGRAM_LISTINGS_CHANNEL_ID
           script_stop: true
           script: |
             set -e
+            for v in TELEGRAM_BOT_TOKEN DATABASE_URL TELEGRAM_LISTINGS_CHANNEL_ID; do
+              eval "val=\$$v"
+              if [ -z "$val" ]; then
+                echo "$v secret must be set"
+                exit 1
+              fi
+            done
+            E="-e TELEGRAM_BOT_TOKEN -e DATABASE_URL -e TELEGRAM_LISTINGS_CHANNEL_ID"
             docker pull "${{ env.IMAGE_NAME }}:latest"
             docker stop exchange-money-bot 2>/dev/null || true
             docker rm exchange-money-bot 2>/dev/null || true
             docker run -d \
               --name exchange-money-bot \
               --restart unless-stopped \
-              --env-file "${{ env.VM_ENV_FILE_PATH }}" \
+              $E \
               -p 8000:8000 \
               "${{ env.IMAGE_NAME }}:latest"
-            # Drop untagged layers left after re-tagging :latest (frees disk on small VMs)
             docker image prune -f
