@@ -362,11 +362,11 @@ async def build_my_offers_ui(user_id: int) -> tuple[str, InlineKeyboardMarkup]:
             rows.append(
                 [
                     InlineKeyboardButton(
-                        t("offers.btn_remove"),
+                        t("offers.btn_remove_i", i=i),
                         callback_data=f"offer:del:{o.id}",
                     ),
                     InlineKeyboardButton(
-                        t("offers.btn_sold"),
+                        t("offers.btn_sold_i", i=i),
                         callback_data=f"offer:sold:{o.id}",
                     ),
                 ]

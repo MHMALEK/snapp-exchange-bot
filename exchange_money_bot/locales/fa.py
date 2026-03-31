@@ -6,10 +6,10 @@ STRINGS: dict[str, str] = {
     "currency.USD": "دلار",
     # Main menu & navigation
     "keyboard.back_main": "بازگشت به منوی اصلی",
-    "keyboard.menu_rial": "مشاهده آگهی‌ها",
+    "keyboard.menu_rial": "مشاهده لیست فروشندگان ارز",
     "keyboard.menu_fx": "ثبت آگهی برای فروش یورو/دلار",
     "keyboard.menu_spot_rates": "قیمت لحظه‌ای دلار و یورو (ریال)",
-    "keyboard.menu_my_offers": "مدیریت آگهی‌های من (حذف)",
+    "keyboard.menu_my_offers": "مدیریت آگهی‌های من",
     "keyboard.menu_delete_account": "حذف اکانت",
     # Membership & channel
     "membership.required_html": (
@@ -31,7 +31,7 @@ STRINGS: dict[str, str] = {
     "rates.listing_rial_gone": "این آگهی دیگر در ربات ثبت نیست.",
     "rates.listing_rial_no_rate": "الان نرخ دلار/یورو به‌روز نیست؛ بعداً دوباره بزنید.",
     "rates.listing_rial_alert": (
-        "{amount} {ccy_fa} ({code})\n"
+        "{amount:,} {ccy_fa} ({code})\n"
         "× {rate:,} ریال/واحد\n"
         "≈ {total:,} ریال (تقریبی)\n\n"
         "فقط راهنما؛ قبل از معامله منابع معتبر را چک کنید."
@@ -57,14 +57,14 @@ STRINGS: dict[str, str] = {
     # Channel listing post (HTML; dynamic parts are escaped before format)
     # Hashtags: currency (#EUR/#USD) + side (#فروش). Plain text for channel search.
     "listing.header_html": "💱 <b>آگهی فروش ارز</b>",
-    "listing.amount_line": "💰 مبلغ: <b>{amount}</b> {ccy_fa} ({currency})",
+    "listing.amount_line": "💰 مبلغ: <b>{amount:,}</b> {ccy_fa} ({currency})",
     "listing.seller_line": "👤 فروشنده: {name}",
     "listing.telegram_line": "📱 تلگرام: {telegram_line}",
     "listing.tags_template": "🏷 #{currency} #فروش",
     "listing.no_username": "بدون نام کاربری — از دکمهٔ تماس استفاده کنید",
     "listing.closed_note": "<i>این آگهی برداشته شد.</i>",
     "listing.sold_note": "<i>فروش انجام شد — این آگهی دیگر فعال نیست.</i>",
-    "listing.contact_btn": "تماس — {amount} {ccy_fa}",
+    "listing.contact_btn": "تماس — {amount:,} {ccy_fa}",
     "listing.rial_btn": "≈ معادل ریالی",
     # Home & consent
     "home.registered": (
@@ -117,9 +117,9 @@ STRINGS: dict[str, str] = {
     # My offers UI
     "offers.title_html": "<b>آگهی‌های فروش من</b>",
     "offers.empty": "هنوز آگهی فعالی ثبت نکرده‌اید.",
-    "offers.line_html": "{i}) مبلغ <b>{amount}</b> {ccy} — ثبت: {dt}",
-    "offers.btn_remove": "حذف",
-    "offers.btn_sold": "فروش رفت",
+    "offers.line_html": "{i}) مبلغ <b>{amount:,}</b> {ccy} — ثبت: {dt}",
+    "offers.btn_remove_i": "{i}) حذف",
+    "offers.btn_sold_i": "{i}) فروش رفت",
     "offers.relist_hint_html": (
         "برای <b>تبلیغ دوباره</b> با مبلغ یا شرایط جدید، از منوی اصلی "
         "«<b>ثبت آگهی فروش ارز</b>» را بزنید و یک آگهی تازه ثبت کنید؛ هر بار فقط همان آگهیٔ جدید در کانال دیده می‌شود."
@@ -141,7 +141,7 @@ STRINGS: dict[str, str] = {
     "sell.btn_usd": "دلار (USD)",
     "sell.summary": (
         "خلاصهٔ آگهی فروش:\n\n"
-        "مبلغ: {amount}\n"
+        "مبلغ: {amount:,}\n"
         "ارز: {currency_label}\n"
         "نام نمایشی: {display_name}\n"
         "یوزرنیم تلگرام: {uname}\n\n"
@@ -154,7 +154,7 @@ STRINGS: dict[str, str] = {
     "sell.btn_abort": "انصراف",
     "sell.aborted": "ثبت آگهی لغو شد.\nیکی از گزینه‌های منو را انتخاب کنید:",
     "sell.cancelled_cmd": "فرم فروش لغو شد. از منوی زیر ادامه دهید:",
-    "sell.success_intro": "ثبت شما انجام شد.\nمبلغ {amount} {currency_label}.\n{channel_note}",
+    "sell.success_intro": "ثبت شما انجام شد.\nمبلغ {amount:,} {currency_label}.\n{channel_note}",
     "sell.success_channel_on_html": (
         "آگهی شما در <b>کانال</b> هم منتشر شد؛ خریداران از آنجا می‌توانند با شما تماس بگیرند."
     ),
