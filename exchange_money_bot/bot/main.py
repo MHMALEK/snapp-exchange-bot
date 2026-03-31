@@ -1,48 +1,27 @@
 import html
 import logging
-import math
 import re
 from typing import Optional
 
 import httpx
-from telegram import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram import Bot, CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import Application, CallbackQueryHandler, CommandHandler, ContextTypes
 
 from exchange_money_bot.bot.keyboards import (
     MENU_MAIN_CALLBACK,
-    buyer_currency_pick_keyboard,
     main_menu_keyboard,
     with_back_to_main,
 )
 from exchange_money_bot.bot.sell_flow import build_sell_conversation_handler
 from exchange_money_bot.config import settings
 from exchange_money_bot.database import async_session_factory, init_db
-from exchange_money_bot.models import SellOffer
-from exchange_money_bot.services import irr_fiat_rates as irr_fiat_rates_service
+from exchange_money_bot.i18n import t
 from exchange_money_bot.services import sell_offers as sell_offers_service
+from exchange_money_bot.services import telegram_channel as telegram_channel_service
 from exchange_money_bot.services import users as user_service
+from exchange_money_bot.services.sell_offers import DeletedSellOfferSnapshot
 
 logger = logging.getLogger(__name__)
-
-
-async def _buyer_irr_rates_banner_html() -> str:
-    if not settings.buyer_show_irr_rates:
-        return ""
-    usd_url = settings.buyer_irr_rates_usd_json_url or irr_fiat_rates_service.DEFAULT_USD_JSON_URL
-    eur_url = settings.buyer_irr_rates_eur_json_url or irr_fiat_rates_service.DEFAULT_EUR_JSON_URL
-    usd_p, eur_p, ts = await irr_fiat_rates_service.get_usd_eur_rial_snapshot(
-        usd_json_url=usd_url,
-        eur_json_url=eur_url,
-        ttl_seconds=settings.buyer_irr_rates_ttl_seconds,
-    )
-    return irr_fiat_rates_service.format_buyer_rates_banner_html(usd_p, eur_p, ts)
-
-
-async def _prepend_irr_rates_to_buyer_html(body: str) -> str:
-    banner = await _buyer_irr_rates_banner_html()
-    if not banner:
-        return body
-    return banner + "\n\n" + body
 
 
 async def _edit_or_reply(
@@ -67,292 +46,75 @@ async def _edit_or_reply(
         )
 
 
-# Telegram Bot API: message text max length (Unicode scalar values).
-TELEGRAM_MAX_MESSAGE_TEXT = 4096
-# Inline keyboards are limited to ~100 buttons total; we reserve rows for nav + back.
-BUY_CATALOG_NAME_MAX = 56
-BUY_CATALOG_USERNAME_MAX = 36
-
-
-def _truncate_catalog_field(value: str, max_len: int) -> str:
-    s = value.strip()
-    if len(s) <= max_len:
-        return s
-    if max_len <= 1:
-        return "…"
-    return s[: max_len - 1] + "…"
-
-
-def _seller_open_chat_url(offer: SellOffer) -> str:
-    if offer.telegram_username:
-        u = offer.telegram_username.strip().lstrip("@")
-        if u:
-            return f"https://t.me/{u}"
-    return f"tg://user?id={offer.telegram_id}"
-
-
-def _seller_contact_button_label(offer: SellOffer) -> str:
-    ccy = sell_offers_service.currency_label_fa(offer.currency)
-    label = f"تماس — {offer.amount} {ccy}"
-    if len(label) > 64:
-        label = label[:61] + "…"
-    return label
-
-
-def _buy_cat_callback_data(currency: str, page_idx: int) -> str:
-    return f"buy:cat:{currency}:{page_idx}"
-
-
 _BUY_CCY = r"(EUR|USD)"
 BUY_FLOW_CALLBACK_PATTERN = rf"^buy:(choose|ccy:{_BUY_CCY}|cat:{_BUY_CCY}:\d+)$"
 
 
-async def show_buy_currency_picker_message(query: CallbackQuery) -> None:
-    if query.message is None:
-        return
-    body = (
-        "<b>خرید ارز</b>\n\n"
-        "ابتدا ارزی را که می‌خواهید <b>بخرید</b> انتخاب کنید؛ "
-        "بعد فقط همان آگهی‌ها را می‌بینید."
-    )
-    text = await _prepend_irr_rates_to_buyer_html(body)
-    await _edit_or_reply(
-        query.message,
-        text,
-        reply_markup=buyer_currency_pick_keyboard(),
-        parse_mode="HTML",
-    )
-
-
-async def build_buyer_catalog_ui(
-    buyer_telegram_id: int,
-    currency: str,
-    page: int,
-) -> tuple[str, InlineKeyboardMarkup]:
-    if currency not in sell_offers_service.ALLOWED_CURRENCIES:
-        raise ValueError(f"Invalid buyer catalog currency: {currency}")
-    page_size = settings.buyer_catalog_page_size
-    ccy_fa = sell_offers_service.currency_label_fa(currency)
-    irr_banner = await _buyer_irr_rates_banner_html()
-
-    async with async_session_factory() as session:
-        total = await sell_offers_service.count_public_sell_offers(
-            session,
-            exclude_telegram_id=buyer_telegram_id,
-            currency=currency,
-        )
-        if total == 0:
-            own_n = await sell_offers_service.count_offers_by_telegram_and_currency(
-                session,
-                buyer_telegram_id,
-                currency,
-            )
-            if own_n > 0:
-                text = (
-                    f"<b>خرید {html.escape(ccy_fa)}</b> ({currency})\n\n"
-                    "در این بخش فقط آگهی‌های <b>دیگران</b> را می‌بینید؛ "
-                    "آگهی‌های خودتان اینجا عمداً نمایش داده نمی‌شود.\n\n"
-                    "شما برای این ارز آگهی فروش دارید؛ دیگران آن را در همین فهرست می‌بینند. "
-                    "برای دیدن یا حذف آگهی‌های خودتان از منو «آگهی‌های من» را بزنید."
-                )
-            else:
-                text = (
-                    f"<b>خرید {html.escape(ccy_fa)}</b> ({currency})\n\n"
-                    "فعلاً آگهی فروشی برای این ارز از دیگران در فهرست نیست.\n"
-                    "ارز دیگری انتخاب کنید یا بعداً دوباره امتحان کنید."
-                )
-            if irr_banner:
-                text = irr_banner + "\n\n" + text
-            kb = with_back_to_main(
-                InlineKeyboardMarkup(
-                    [
-                        [
-                            InlineKeyboardButton(
-                                "انتخاب ارز دیگر", callback_data="buy:choose"
-                            )
-                        ]
-                    ]
-                )
-            )
-            return text, kb
-
-        total_pages = max(1, math.ceil(total / page_size))
-        page = max(0, min(page, total_pages - 1))
-        offset = page * page_size
-        offers = await sell_offers_service.list_public_sell_offers(
-            session,
-            exclude_telegram_id=buyer_telegram_id,
-            currency=currency,
-            limit=page_size,
-            offset=offset,
-        )
-
-    lines: list[str] = []
-    if irr_banner:
-        lines.extend(irr_banner.split("\n"))
-        lines.append("")
-    lines.extend(
-        [
-            "<b>فهرست فروشندگان</b>",
-            "",
-            f"ارز: <b>{html.escape(ccy_fa)}</b> ({html.escape(currency, quote=False)})",
-            "",
-            f"در مجموع <b>{total}</b> آگهی — صفحه <b>{page + 1}</b> از <b>{total_pages}</b>",
-        ]
-    )
+def _listings_channel_cta_keyboard() -> InlineKeyboardMarkup:
     rows: list[list[InlineKeyboardButton]] = []
-    for i, o in enumerate(offers, start=offset + 1):
-        ccy = sell_offers_service.currency_label_fa(o.currency)
-        name_plain = _truncate_catalog_field(
-            o.seller_display_name, BUY_CATALOG_NAME_MAX
-        )
-        name_safe = html.escape(name_plain, quote=False)
-        if o.telegram_username:
-            u_plain = _truncate_catalog_field(
-                o.telegram_username.strip().lstrip("@"),
-                BUY_CATALOG_USERNAME_MAX,
-            )
-            uname = f"@{html.escape(u_plain, quote=False)}"
-        else:
-            uname = "بدون @ — دکمهٔ تماس"
-        lines.append(f"{i}) مبلغ <b>{o.amount}</b> {ccy} — {name_safe}")
-        lines.append(f"   {uname}")
-        lines.append("")
+    open_url = settings.effective_listings_channel_open_url()
+    if open_url:
         rows.append(
             [
                 InlineKeyboardButton(
-                    _seller_contact_button_label(o),
-                    url=_seller_open_chat_url(o),
+                    t("channel.btn_open"),
+                    url=open_url,
                 )
             ]
         )
-
-    rows.append([InlineKeyboardButton("انتخاب ارز دیگر", callback_data="buy:choose")])
-
-    last_page = total_pages - 1
-    if total_pages > 1:
-        row_jump: list[InlineKeyboardButton] = []
-        if page > 0:
-            if page > 1:
-                row_jump.append(
-                    InlineKeyboardButton(
-                        "«اول»",
-                        callback_data=_buy_cat_callback_data(currency, 0),
-                    )
-                )
-            row_jump.append(
-                InlineKeyboardButton(
-                    "◀ قبلی",
-                    callback_data=_buy_cat_callback_data(currency, page - 1),
-                )
-            )
-        if page < last_page:
-            row_jump.append(
-                InlineKeyboardButton(
-                    "بعدی ▶",
-                    callback_data=_buy_cat_callback_data(currency, page + 1),
-                )
-            )
-            if page < last_page - 1:
-                row_jump.append(
-                    InlineKeyboardButton(
-                        "«آخر»",
-                        callback_data=_buy_cat_callback_data(currency, last_page),
-                    )
-                )
-        if row_jump:
-            rows.append(row_jump)
-
-    full_text = "\n".join(lines).rstrip()
-    if len(full_text) > TELEGRAM_MAX_MESSAGE_TEXT:
-        logger.warning(
-            "Buyer catalog text length %s exceeds limit %s (currency=%s page=%s offers=%s); truncating.",
-            len(full_text),
-            TELEGRAM_MAX_MESSAGE_TEXT,
-            currency,
-            page,
-            len(offers),
-        )
-        suffix = "\n\n<i>… محدودیت طول پیام تلگرام</i>"
-        cut = TELEGRAM_MAX_MESSAGE_TEXT - len(suffix)
-        full_text = full_text[:cut] + suffix
-
-    return full_text, with_back_to_main(InlineKeyboardMarkup(rows))
+    return with_back_to_main(InlineKeyboardMarkup(rows))
 
 
-async def execute_buy_flow_callback(query: CallbackQuery) -> None:
+def _listings_channel_message_body(*, for_rial: bool) -> str:
+    base = t("listings.cta_rial_html") if for_rial else t("listings.cta_html")
+    open_url = settings.effective_listings_channel_open_url()
+    if open_url:
+        url_esc = html.escape(open_url, quote=True)
+        label_esc = html.escape(t("listings.channel_link_label"), quote=False)
+        return f'{base}\n\n<a href="{url_esc}">{label_esc}</a>'
+    if settings.telegram_listings_channel_id:
+        return f"{base}\n\n{t('listings.cta_configure_invite_hint_html')}"
+    return base
+
+
+async def execute_buy_flow_callback(query: CallbackQuery, bot: Bot) -> None:
+    """Legacy buy:* callbacks now only point users to the public listings channel."""
     if query.data is None or query.message is None or query.from_user is None:
         await query.answer()
         return
     await query.answer()
-    data = query.data
     tid = query.from_user.id
     async with async_session_factory() as session:
         registered = await user_service.get_user_by_telegram(session, tid)
     if registered is None:
         await _edit_or_reply(
             query.message,
-            "برای استفاده از این گزینه‌ها ابتدا با /start ثبت‌نام کنید.",
+            t("error.register_first"),
             reply_markup=with_back_to_main(InlineKeyboardMarkup([])),
         )
         return
-
-    if data == "buy:choose":
-        await show_buy_currency_picker_message(query)
-        return
-
-    m_ccy_pick = re.fullmatch(rf"buy:ccy:{_BUY_CCY}", data)
-    if m_ccy_pick:
-        ccy = m_ccy_pick.group(1)
-        text, keyboard = await build_buyer_catalog_ui(tid, ccy, 0)
+    if not await telegram_channel_service.user_passes_membership_gate(bot, tid):
+        join_kb = telegram_channel_service.join_channel_keyboard() or InlineKeyboardMarkup([])
         await _edit_or_reply(
             query.message,
-            text,
-            reply_markup=keyboard,
+            t("membership.required_html"),
+            reply_markup=with_back_to_main(join_kb),
             parse_mode="HTML",
         )
         return
-
-    m_cat = re.fullmatch(rf"buy:cat:{_BUY_CCY}:(\d+)", data)
-    if m_cat:
-        ccy = m_cat.group(1)
-        page = int(m_cat.group(2))
-        text, keyboard = await build_buyer_catalog_ui(tid, ccy, page)
-        await _edit_or_reply(
-            query.message,
-            text,
-            reply_markup=keyboard,
-            parse_mode="HTML",
-        )
+    await _edit_or_reply(
+        query.message,
+        _listings_channel_message_body(for_rial=False),
+        reply_markup=_listings_channel_cta_keyboard(),
+        parse_mode="HTML",
+    )
 
 
 async def buy_flow_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
     if query is None:
         return
-    await execute_buy_flow_callback(query)
-
-
-REGISTERED_HOME_TEXT = (
-    "خوش برگشتی!\n"
-    "آگهی‌های قبلی را از «آگهی‌های من» ببینید یا حذف کنید؛ "
-    "برای حذف کل حساب از «حذف داده‌های من» یا /delete استفاده کنید.\n\n"
-    "یکی از گزینه‌ها را انتخاب کنید:"
-)
-
-CONSENT_TEXT = (
-    "برای استفاده از این ربات، آیا مایلید ثبت‌نام کنید؟\n\n"
-    "در صورت موافقت، <b>نام نمایشی</b> و حداقل اطلاعات لازم از حساب تلگرام شما "
-    "فقط برای شناسایی حساب در همین سرویس ذخیره می‌شود. "
-    "این اطلاعات در پیام‌های ربات به شما یا سایر کاربران نمایش داده نخواهد شد.\n\n"
-    "این پروژه <b>رایگان</b> و <b>متن‌باز</b> است و صرفاً برای "
-    "تسهیل ارتباط و تبادل بین کاربران طراحی شده است. "
-    "اطلاعات شما برای تبلیغات، فروش یا استفادهٔ تجاری به کار نمی‌رود.\n\n"
-    "همچنین این ربات فقط یک واسط بین کاربران است و هیچ مسئولیتی در قبال قیمت‌ها، "
-    "انجام معامله، صحت اطلاعات کاربران، اعتبار طرفین، وریفای یا هرگونه ضمانت و خسارت احتمالی "
-    "نمی‌پذیرد. مسئولیت بررسی نهایی و انجام امن هرگونه تبادل بر عهدهٔ خود کاربران است.\n\n"
-    "آیا با ثبت‌نام موافقید؟"
-)
+    await execute_buy_flow_callback(query, context.bot)
 
 
 def consent_keyboard() -> InlineKeyboardMarkup:
@@ -360,13 +122,13 @@ def consent_keyboard() -> InlineKeyboardMarkup:
         [
             [
                 InlineKeyboardButton(
-                    "بله، ثبت‌نام می‌کنم",
+                    t("consent.btn_yes"),
                     callback_data="consent:yes",
                 ),
             ],
             [
                 InlineKeyboardButton(
-                    "خیر",
+                    t("consent.btn_no"),
                     callback_data="consent:no",
                 ),
             ],
@@ -380,11 +142,11 @@ def delete_confirm_keyboard() -> InlineKeyboardMarkup:
             [
                 [
                     InlineKeyboardButton(
-                        "بله، حذف شود",
+                        t("account.delete_btn_yes"),
                         callback_data="account:delete_yes",
                     ),
                     InlineKeyboardButton(
-                        "انصراف",
+                        t("account.delete_btn_cancel"),
                         callback_data="account:delete_no",
                     ),
                 ],
@@ -393,23 +155,32 @@ def delete_confirm_keyboard() -> InlineKeyboardMarkup:
     )
 
 
-async def apply_home_screen(query) -> None:
+async def apply_home_screen(query, bot: Bot) -> None:
     """Same outcome as /start: main menu for registered users or consent screen for guests."""
     if query.message is None or query.from_user is None:
         return
     tid = query.from_user.id
+    if not await telegram_channel_service.user_passes_membership_gate(bot, tid):
+        join_kb = telegram_channel_service.join_channel_keyboard() or InlineKeyboardMarkup([])
+        await _edit_or_reply(
+            query.message,
+            t("membership.required_html"),
+            reply_markup=with_back_to_main(join_kb),
+            parse_mode="HTML",
+        )
+        return
     async with async_session_factory() as session:
         db_user = await user_service.get_user_by_telegram(session, tid)
     if db_user is not None:
         await _edit_or_reply(
             query.message,
-            REGISTERED_HOME_TEXT,
+            t("home.registered"),
             reply_markup=main_menu_keyboard(),
         )
     else:
         await _edit_or_reply(
             query.message,
-            CONSENT_TEXT,
+            t("consent.body_html"),
             reply_markup=consent_keyboard(),
             parse_mode="HTML",
         )
@@ -422,10 +193,27 @@ async def menu_main_callback(
     if query is None or query.message is None or query.from_user is None:
         return
     await query.answer()
-    await apply_home_screen(query)
+    await apply_home_screen(query, context.bot)
 
 
-async def delete_user_data(telegram_id: int) -> bool:
+async def delete_user_data(telegram_id: int, bot: Optional[Bot] = None) -> bool:
+    async with async_session_factory() as session:
+        user = await user_service.get_user_by_telegram(session, telegram_id)
+        if user is None:
+            return False
+        offers = await sell_offers_service.list_offers_for_user(session, user.id)
+        snapshots = [
+            DeletedSellOfferSnapshot(
+                amount=o.amount,
+                currency=o.currency,
+                seller_display_name=o.seller_display_name,
+                telegram_username=o.telegram_username,
+                telegram_id=o.telegram_id,
+                listings_channel_message_id=o.listings_channel_message_id,
+            )
+            for o in offers
+        ]
+    await telegram_channel_service.close_listings_for_offers(bot, snapshots)
     async with async_session_factory() as session:
         return await user_service.delete_user_by_telegram(session, telegram_id)
 
@@ -433,23 +221,31 @@ async def delete_user_data(telegram_id: int) -> bool:
 async def build_my_offers_ui(user_id: int) -> tuple[str, InlineKeyboardMarkup]:
     async with async_session_factory() as session:
         offers = await sell_offers_service.list_offers_for_user(session, user_id)
-    lines = ["<b>آگهی‌های فروش من</b>", ""]
+    lines = [t("offers.title_html"), ""]
     rows: list[list[InlineKeyboardButton]] = []
     if not offers:
-        lines.append("هنوز آگهی فعالی ثبت نکرده‌اید.")
+        lines.append(t("offers.empty"))
     else:
         for i, o in enumerate(offers, start=1):
             ccy = sell_offers_service.currency_label_fa(o.currency)
             dt = (
                 o.created_at.strftime("%Y-%m-%d %H:%M")
                 if o.created_at is not None
-                else "—"
+                else t("sell.display_fallback")
             )
-            lines.append(f"{i}) مبلغ <b>{o.amount}</b> {ccy} — ثبت: {dt}")
+            lines.append(
+                t(
+                    "offers.line_html",
+                    i=i,
+                    amount=o.amount,
+                    ccy=ccy,
+                    dt=dt,
+                )
+            )
             rows.append(
                 [
                     InlineKeyboardButton(
-                        f"حذف — {o.amount} {ccy}",
+                        t("offers.delete_btn", amount=o.amount, ccy=ccy),
                         callback_data=f"offer:del:{o.id}",
                     )
                 ]
@@ -457,13 +253,13 @@ async def build_my_offers_ui(user_id: int) -> tuple[str, InlineKeyboardMarkup]:
     lines.extend(
         [
             "",
-            "برای حذف کل حساب و همهٔ آگهی‌ها از دکمهٔ پایین استفاده کنید.",
+            t("account.delete_footer"),
         ]
     )
     rows.append(
         [
             InlineKeyboardButton(
-                "حذف کامل اطلاعات من از ربات",
+                t("account.delete_all_btn"),
                 callback_data="account:delete",
             )
         ]
@@ -479,12 +275,21 @@ async def account_manage_callback(
         return
     await query.answer()
     tid = query.from_user.id
+    if not await telegram_channel_service.user_passes_membership_gate(context.bot, tid):
+        join_kb = telegram_channel_service.join_channel_keyboard() or InlineKeyboardMarkup([])
+        await _edit_or_reply(
+            query.message,
+            t("membership.required_html"),
+            reply_markup=with_back_to_main(join_kb),
+            parse_mode="HTML",
+        )
+        return
     async with async_session_factory() as session:
         db_user = await user_service.get_user_by_telegram(session, tid)
     if db_user is None:
         await _edit_or_reply(
             query.message,
-            "ابتدا با /start ثبت‌نام کنید.",
+            t("error.register_first_short"),
             reply_markup=with_back_to_main(InlineKeyboardMarkup([])),
         )
         return
@@ -513,20 +318,26 @@ async def offer_delete_callback(
         return
     offer_id = int(m.group(1))
     tid = query.from_user.id
+    if not await telegram_channel_service.user_passes_membership_gate(context.bot, tid):
+        await query.answer(t("error.join_channel_first"), show_alert=True)
+        return
     async with async_session_factory() as session:
         db_user = await user_service.get_user_by_telegram(session, tid)
         if db_user is None:
-            await query.answer("ابتدا ثبت‌نام کنید.", show_alert=True)
+            await query.answer(t("error.register_alert"), show_alert=True)
             return
-        deleted = await sell_offers_service.delete_offer_owned(
+        snap = await sell_offers_service.delete_offer_owned(
             session, offer_id, db_user.id
         )
-        if not deleted:
-            await query.answer(
-                "این آگهی مال شما نیست یا قبلاً حذف شده.", show_alert=True
-            )
+        if snap is None:
+            await query.answer(t("error.offer_not_yours"), show_alert=True)
             return
-    await query.answer("آگهی حذف شد.")
+    await telegram_channel_service.mark_listing_closed_on_channel(
+        context.bot,
+        message_id=snap.listings_channel_message_id,
+        offer=snap,
+    )
+    await query.answer(t("success.offer_deleted"))
     text, keyboard = await build_my_offers_ui(db_user.id)
     await _edit_or_reply(
         query.message,
@@ -551,18 +362,26 @@ async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if update.effective_user is None or update.message is None:
         return
     u = update.effective_user
+    if not await telegram_channel_service.user_passes_membership_gate(context.bot, u.id):
+        join_kb = telegram_channel_service.join_channel_keyboard() or InlineKeyboardMarkup([])
+        await update.message.reply_text(
+            t("membership.required_html"),
+            reply_markup=with_back_to_main(join_kb),
+            parse_mode="HTML",
+        )
+        return
     async with async_session_factory() as session:
         existing = await user_service.get_user_by_telegram(session, u.id)
 
     if existing is not None:
         await update.message.reply_text(
-            REGISTERED_HOME_TEXT,
+            t("home.registered"),
             reply_markup=main_menu_keyboard(),
         )
         return
 
     await update.message.reply_text(
-        CONSENT_TEXT,
+        t("consent.body_html"),
         reply_markup=consent_keyboard(),
         parse_mode="HTML",
     )
@@ -580,7 +399,7 @@ async def consent_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     if query.data == "consent:no":
         await _edit_or_reply(
             query.message,
-            "اشکالی ندارد. اگر بعداً نظرتان عوض شد، دوباره /start بزنید.",
+            t("consent.declined"),
             reply_markup=with_back_to_main(InlineKeyboardMarkup([])),
         )
         return
@@ -589,6 +408,18 @@ async def consent_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         return
 
     u = query.from_user
+    if not await telegram_channel_service.user_passes_membership_gate(
+        context.bot, u.id
+    ):
+        join_kb = telegram_channel_service.join_channel_keyboard() or InlineKeyboardMarkup([])
+        await _edit_or_reply(
+            query.message,
+            t("membership.required_html"),
+            reply_markup=with_back_to_main(join_kb),
+            parse_mode="HTML",
+        )
+        return
+
     async with async_session_factory() as session:
         await user_service.upsert_user(
             session,
@@ -597,41 +428,45 @@ async def consent_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             first_name=u.first_name,
         )
     await notify_api_after_upsert(u.id)
-    text = (
-        "ثبت‌نام شما با موفقیت انجام شد.\n"
-        "آگهی‌ها را از «آگهی‌های من» مدیریت کنید؛ برای حذف کل حساب «حذف داده‌های من» یا /delete.\n\n"
-        "حالا یکی از گزینه‌های زیر را انتخاب کنید:"
+    await _edit_or_reply(
+        query.message, t("signup.success"), reply_markup=main_menu_keyboard()
     )
-    await _edit_or_reply(query.message, text, reply_markup=main_menu_keyboard())
 
 
 async def start_menu_callback(
     update: Update, context: ContextTypes.DEFAULT_TYPE
 ) -> None:
+    """Listings channel CTA (start:2 and start:rial — buyer / view list)."""
     query = update.callback_query
-    if (
-        query is None
-        or query.data is None
-        or query.message is None
-        or query.from_user is None
-    ):
+    if query is None or query.data is None or query.message is None or query.from_user is None:
         return
     await query.answer()
+    tid = query.from_user.id
     async with async_session_factory() as session:
-        registered = await user_service.get_user_by_telegram(
-            session, query.from_user.id
-        )
+        registered = await user_service.get_user_by_telegram(session, tid)
     if registered is None:
         await _edit_or_reply(
             query.message,
-            "برای استفاده از این گزینه‌ها ابتدا با /start ثبت‌نام کنید.",
+            t("error.register_first"),
             reply_markup=with_back_to_main(InlineKeyboardMarkup([])),
         )
         return
-    if query.data == "start:2":
-        await show_buy_currency_picker_message(query)
-    else:
+    if not await telegram_channel_service.user_passes_membership_gate(context.bot, tid):
+        join_kb = telegram_channel_service.join_channel_keyboard() or InlineKeyboardMarkup([])
+        await _edit_or_reply(
+            query.message,
+            t("membership.required_html"),
+            reply_markup=with_back_to_main(join_kb),
+            parse_mode="HTML",
+        )
         return
+    for_rial = query.data == "start:rial"
+    await _edit_or_reply(
+        query.message,
+        _listings_channel_message_body(for_rial=for_rial),
+        reply_markup=_listings_channel_cta_keyboard(),
+        parse_mode="HTML",
+    )
 
 
 async def account_delete_callback(
@@ -646,11 +481,23 @@ async def account_delete_callback(
     ):
         return
 
+    tid = query.from_user.id
+    if not await telegram_channel_service.user_passes_membership_gate(context.bot, tid):
+        await query.answer()
+        join_kb = telegram_channel_service.join_channel_keyboard() or InlineKeyboardMarkup([])
+        await _edit_or_reply(
+            query.message,
+            t("membership.required_html"),
+            reply_markup=with_back_to_main(join_kb),
+            parse_mode="HTML",
+        )
+        return
+
     if query.data == "account:delete":
         await query.answer()
         await _edit_or_reply(
             query.message,
-            "همهٔ اطلاعات ذخیره‌شدهٔ شما در این ربات حذف می‌شود. مطمئن هستید؟",
+            t("account.delete_confirm"),
             reply_markup=delete_confirm_keyboard(),
         )
         return
@@ -660,7 +507,7 @@ async def account_delete_callback(
     if query.data == "account:delete_no":
         await _edit_or_reply(
             query.message,
-            "حذف انجام نشد.\n\nیکی از گزینه‌ها را انتخاب کنید:",
+            t("account.delete_cancelled"),
             reply_markup=main_menu_keyboard(),
         )
         return
@@ -668,19 +515,18 @@ async def account_delete_callback(
     if query.data != "account:delete_yes":
         return
 
-    tid = query.from_user.id
-    ok = await delete_user_data(tid)
+    ok = await delete_user_data(tid, context.bot)
     back_only = with_back_to_main(InlineKeyboardMarkup([]))
     if ok:
         await _edit_or_reply(
             query.message,
-            "اطلاعات شما حذف شد. اگر بخواهید دوباره از ربات استفاده کنید، /start بزنید.",
+            t("account.deleted"),
             reply_markup=back_only,
         )
     else:
         await _edit_or_reply(
             query.message,
-            "اطلاعاتی از شما ذخیره نشده بود.",
+            t("account.nothing_stored"),
             reply_markup=back_only,
         )
 
@@ -689,11 +535,19 @@ async def delete_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     if update.effective_user is None or update.message is None:
         return
     tid = update.effective_user.id
-    ok = await delete_user_data(tid)
+    if not await telegram_channel_service.user_passes_membership_gate(context.bot, tid):
+        join_kb = telegram_channel_service.join_channel_keyboard() or InlineKeyboardMarkup([])
+        await update.message.reply_text(
+            t("membership.required_html"),
+            reply_markup=with_back_to_main(join_kb),
+            parse_mode="HTML",
+        )
+        return
+    ok = await delete_user_data(tid, context.bot)
     if ok:
-        await update.message.reply_text("اطلاعات شما حذف شد.")
+        await update.message.reply_text(t("account.deleted_short"))
     else:
-        await update.message.reply_text("اطلاعاتی از شما ذخیره نشده بود.")
+        await update.message.reply_text(t("account.nothing_stored"))
 
 
 async def on_post_init(application: Application) -> None:
@@ -739,7 +593,7 @@ def main() -> None:
         CallbackQueryHandler(buy_flow_callback, pattern=BUY_FLOW_CALLBACK_PATTERN)
     )
     application.add_handler(
-        CallbackQueryHandler(start_menu_callback, pattern=r"^start:2$")
+        CallbackQueryHandler(start_menu_callback, pattern=r"^start:(2|rial)$")
     )
     application.run_polling(allowed_updates=Update.ALL_TYPES)
 
