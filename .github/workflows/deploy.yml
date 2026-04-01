@@ -86,23 +86,30 @@ jobs:
               exit 1
             fi
             E="-e TELEGRAM_BOT_TOKEN -e DATABASE_URL -e TELEGRAM_LISTINGS_CHANNEL_ID"
-            [ -n "${TELEGRAM_MEMBERSHIP_CHANNEL_ID:-}" ] && E="$E -e TELEGRAM_MEMBERSHIP_CHANNEL_ID"
-            [ -n "${TELEGRAM_MEMBERSHIP_GROUP_ID:-}" ] && E="$E -e TELEGRAM_MEMBERSHIP_GROUP_ID"
-            [ -n "${TELEGRAM_CHANNEL_INVITE_URL:-}" ] && E="$E -e TELEGRAM_CHANNEL_INVITE_URL"
-            [ -n "${TELEGRAM_MEMBERSHIP_GROUP_INVITE_URL:-}" ] && E="$E -e TELEGRAM_MEMBERSHIP_GROUP_INVITE_URL"
-            [ -n "${TELEGRAM_DISABLE_MEMBERSHIP_GATE:-}" ] && E="$E -e TELEGRAM_DISABLE_MEMBERSHIP_GATE"
-            [ -n "${API_BASE_URL:-}" ] && E="$E -e API_BASE_URL"
-            [ -n "${IRR_RATES_TTL_SECONDS:-}" ] && E="$E -e IRR_RATES_TTL_SECONDS"
-            [ -n "${IRR_USD_JSON_URL:-}" ] && E="$E -e IRR_USD_JSON_URL"
-            [ -n "${IRR_EUR_JSON_URL:-}" ] && E="$E -e IRR_EUR_JSON_URL"
+            # Use if/fi (not &&) so set -e + dash on the VM does not exit when a var is empty.
+            if [ -n "${TELEGRAM_MEMBERSHIP_CHANNEL_ID:-}" ]; then E="$E -e TELEGRAM_MEMBERSHIP_CHANNEL_ID"; fi
+            if [ -n "${TELEGRAM_MEMBERSHIP_GROUP_ID:-}" ]; then E="$E -e TELEGRAM_MEMBERSHIP_GROUP_ID"; fi
+            if [ -n "${TELEGRAM_CHANNEL_INVITE_URL:-}" ]; then E="$E -e TELEGRAM_CHANNEL_INVITE_URL"; fi
+            if [ -n "${TELEGRAM_MEMBERSHIP_GROUP_INVITE_URL:-}" ]; then E="$E -e TELEGRAM_MEMBERSHIP_GROUP_INVITE_URL"; fi
+            if [ -n "${TELEGRAM_DISABLE_MEMBERSHIP_GATE:-}" ]; then E="$E -e TELEGRAM_DISABLE_MEMBERSHIP_GATE"; fi
+            if [ -n "${API_BASE_URL:-}" ]; then E="$E -e API_BASE_URL"; fi
+            if [ -n "${IRR_RATES_TTL_SECONDS:-}" ]; then E="$E -e IRR_RATES_TTL_SECONDS"; fi
+            if [ -n "${IRR_USD_JSON_URL:-}" ]; then E="$E -e IRR_USD_JSON_URL"; fi
+            if [ -n "${IRR_EUR_JSON_URL:-}" ]; then E="$E -e IRR_EUR_JSON_URL"; fi
             # Public GHCR image: anonymous pull on the VPS (no docker login).
-            docker pull "${{ env.IMAGE_NAME }}:latest"
+            if ! docker pull "${{ env.IMAGE_NAME }}:latest"; then
+              echo "docker pull failed"
+              exit 1
+            fi
             docker stop exchange-money-bot 2>/dev/null || true
             docker rm exchange-money-bot 2>/dev/null || true
-            docker run -d \
+            if ! docker run -d \
               --name exchange-money-bot \
               --restart unless-stopped \
               $E \
               -p 8000:8000 \
-              "${{ env.IMAGE_NAME }}:latest"
-            docker image prune -f
+              "${{ env.IMAGE_NAME }}:latest"; then
+              echo "docker run failed"
+              exit 1
+            fi
+            docker image prune -f || true
