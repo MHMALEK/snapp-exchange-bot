@@ -327,6 +327,7 @@ async def delete_user_data(telegram_id: int, bot: Optional[Bot] = None) -> bool:
                 telegram_username=o.telegram_username,
                 telegram_id=o.telegram_id,
                 listings_channel_message_id=o.listings_channel_message_id,
+                description=o.description,
             )
             for o in offers
         ]
@@ -350,6 +351,12 @@ async def build_my_offers_ui(user_id: int) -> tuple[str, InlineKeyboardMarkup]:
                 if o.created_at is not None
                 else t("sell.display_fallback")
             )
+            desc_suffix = ""
+            if o.description and str(o.description).strip():
+                snippet = html.escape(str(o.description).strip()[:72], quote=False)
+                if len(str(o.description).strip()) > 72:
+                    snippet += "…"
+                desc_suffix = t("offers.desc_line_html", snippet=snippet)
             lines.append(
                 t(
                     "offers.line_html",
@@ -357,6 +364,7 @@ async def build_my_offers_ui(user_id: int) -> tuple[str, InlineKeyboardMarkup]:
                     amount=o.amount,
                     ccy=ccy,
                     dt=dt,
+                    desc_suffix=desc_suffix,
                 )
             )
             rows.append(

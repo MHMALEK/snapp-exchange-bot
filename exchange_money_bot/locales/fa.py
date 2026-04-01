@@ -58,6 +58,7 @@ STRINGS: dict[str, str] = {
     # Hashtags: currency (#EUR/#USD) + side (#فروش). Plain text for channel search.
     "listing.header_html": "💱 <b>آگهی فروش ارز</b>",
     "listing.amount_line": "💰 مبلغ: <b>{amount:,}</b> {ccy_fa} ({currency})",
+    "listing.description_line": "📝 <b>توضیحات:</b> {text}",
     "listing.seller_line": "👤 فروشنده: {name}",
     "listing.telegram_line": "📱 تلگرام: {telegram_line}",
     "listing.tags_template": "🏷 #{currency} #فروش",
@@ -117,7 +118,8 @@ STRINGS: dict[str, str] = {
     # My offers UI
     "offers.title_html": "<b>آگهی‌های فروش من</b>",
     "offers.empty": "هنوز آگهی فعالی ثبت نکرده‌اید.",
-    "offers.line_html": "{i}) مبلغ <b>{amount:,}</b> {ccy} — ثبت: {dt}",
+    "offers.line_html": "{i}) مبلغ <b>{amount:,}</b> {ccy} — ثبت: {dt}{desc_suffix}",
+    "offers.desc_line_html": "\n   📝 <i>{snippet}</i>",
     "offers.btn_remove_i": "{i}) حذف",
     "offers.btn_sold_i": "{i}) فروش رفت",
     "offers.relist_hint_html": (
@@ -139,10 +141,29 @@ STRINGS: dict[str, str] = {
     "sell.currency_reminder": "لطفاً با یکی از دکمه‌ها، ارز را انتخاب کنید.",
     "sell.btn_eur": "یورو (EUR)",
     "sell.btn_usd": "دلار (USD)",
+    "sell.description_prompt": (
+        "توضیحات آگهی را بنویسید (حداکثر {max} نویسه).\n\n"
+        "مثال: نقد در تهران، فقط حضوری، …\n\n"
+        "اگر توضیحی نمی‌خواهید، «بدون توضیح» را بزنید.\n"
+        "برای لغو: /cancel"
+    ),
+    "sell.description_empty": (
+        "متن خالی است. توضیح را بنویسید یا دکمهٔ «بدون توضیح» را بزنید."
+    ),
+    "sell.description_too_long": (
+        "متن از {max} نویسه بیشتر است. کوتاه‌تر بنویسید یا دکمهٔ «بدون توضیح» را بزنید."
+    ),
+    "sell.description_reminder": (
+        "لطفاً فقط متن توضیحات را بفرستید (حداکثر {max} نویسه) یا «بدون توضیح» را بزنید."
+    ),
+    "sell.btn_desc_skip": "بدون توضیح",
+    "sell.summary_description": "توضیحات: {desc}",
+    "sell.summary_no_description": "توضیحات: —",
     "sell.summary": (
         "خلاصهٔ آگهی فروش:\n\n"
         "مبلغ: {amount:,}\n"
         "ارز: {currency_label}\n"
+        "{description_block}\n"
         "نام نمایشی: {display_name}\n"
         "یوزرنیم تلگرام: {uname}\n\n"
         "برای انصراف «انصراف» را بزنید؛ اگر درست است «تایید و ثبت»."

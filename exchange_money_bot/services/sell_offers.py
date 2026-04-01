@@ -8,6 +8,19 @@ from exchange_money_bot.i18n import t
 from exchange_money_bot.models import SellOffer
 
 ALLOWED_CURRENCIES = frozenset({"EUR", "USD"})
+MAX_OFFER_DESCRIPTION_LEN = 200
+
+
+def normalize_offer_description(raw: Optional[str]) -> Optional[str]:
+    """Strip whitespace; empty becomes None; raises ValueError if over max length."""
+    if raw is None:
+        return None
+    s = raw.strip()
+    if not s:
+        return None
+    if len(s) > MAX_OFFER_DESCRIPTION_LEN:
+        raise ValueError("Description too long")
+    return s
 
 
 @dataclass
@@ -20,6 +33,7 @@ class DeletedSellOfferSnapshot:
     telegram_username: Optional[str]
     telegram_id: int
     listings_channel_message_id: Optional[int]
+    description: Optional[str] = None
 
 
 def currency_label_fa(code: str) -> str:
@@ -108,6 +122,7 @@ async def delete_offer_owned(
         telegram_username=row.telegram_username,
         telegram_id=row.telegram_id,
         listings_channel_message_id=row.listings_channel_message_id,
+        description=getattr(row, "description", None),
     )
     await session.delete(row)
     await session.commit()
@@ -134,11 +149,13 @@ async def create_sell_offer(
     seller_display_name: str,
     amount: int,
     currency: str,
+    description: Optional[str] = None,
 ) -> SellOffer:
     if currency not in ALLOWED_CURRENCIES:
         raise ValueError(f"Invalid currency: {currency}")
     if amount <= 0:
         raise ValueError("Amount must be positive")
+    desc = normalize_offer_description(description)
     offer = SellOffer(
         user_id=user_id,
         telegram_id=telegram_id,
@@ -146,6 +163,7 @@ async def create_sell_offer(
         seller_display_name=seller_display_name,
         amount=amount,
         currency=currency,
+        description=desc,
     )
     session.add(offer)
     await session.commit()

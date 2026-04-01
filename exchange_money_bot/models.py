@@ -50,6 +50,7 @@ class SellOffer(Base):
     seller_display_name: Mapped[str] = mapped_column(String(512), nullable=False)
     amount: Mapped[int] = mapped_column(BigInteger, nullable=False)
     currency: Mapped[str] = mapped_column(String(8), nullable=False, index=True)
+    description: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

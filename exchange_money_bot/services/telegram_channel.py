@@ -24,6 +24,7 @@ class _ListingDisplay(Protocol):
     seller_display_name: str
     telegram_username: Optional[str]
     telegram_id: int
+    description: Optional[str]
 
 
 _MEMBER_OK = frozenset(
@@ -59,21 +60,28 @@ def format_listing_html(
         uname = f"@{html.escape(u, quote=False)}"
     else:
         uname = t("listing.no_username")
-    body = "\n".join(
+    parts: list[str] = [
+        t("listing.header_html"),
+        t(
+            "listing.amount_line",
+            amount=offer.amount,
+            ccy_fa=ccy_esc,
+            currency=cur_esc,
+        ),
+    ]
+    desc_raw = offer.description
+    if desc_raw and str(desc_raw).strip():
+        desc_esc = html.escape(str(desc_raw).strip(), quote=False)
+        parts.append(t("listing.description_line", text=desc_esc))
+    parts.extend(
         [
-            t("listing.header_html"),
-            t(
-                "listing.amount_line",
-                amount=offer.amount,
-                ccy_fa=ccy_esc,
-                currency=cur_esc,
-            ),
             t("listing.seller_line", name=name),
             t("listing.telegram_line", telegram_line=uname),
             "",
             t("listing.tags_template", currency=offer.currency.upper()),
         ]
     )
+    body = "\n".join(parts)
     if closed:
         return f"<s>{body}</s>\n\n{t(closed_note_key)}"
     return body

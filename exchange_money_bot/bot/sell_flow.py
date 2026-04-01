@@ -29,7 +29,9 @@ from exchange_money_bot.services import users as user_service
 
 logger = logging.getLogger(__name__)
 
-SELL_AMOUNT, SELL_CURRENCY, SELL_CONFIRM = range(3)
+SELL_AMOUNT, SELL_CURRENCY, SELL_DESCRIPTION, SELL_CONFIRM = range(4)
+
+MAX_DESCRIPTION_LEN = sell_offers_service.MAX_OFFER_DESCRIPTION_LEN
 
 
 async def _end_sell_if_not_member(
@@ -87,6 +89,20 @@ def _currency_keyboard() -> InlineKeyboardMarkup:
     )
 
 
+def _description_keyboard() -> InlineKeyboardMarkup:
+    return with_back_to_main(
+        InlineKeyboardMarkup(
+            [
+                [
+                    InlineKeyboardButton(
+                        t("sell.btn_desc_skip"), callback_data="sell:desc:skip"
+                    ),
+                ],
+            ]
+        )
+    )
+
+
 def _confirm_keyboard() -> InlineKeyboardMarkup:
     return with_back_to_main(
         InlineKeyboardMarkup(
@@ -97,6 +113,28 @@ def _confirm_keyboard() -> InlineKeyboardMarkup:
                 ],
             ]
         )
+    )
+
+
+def _sell_summary_text(
+    *,
+    amount: int,
+    code: str,
+    display_name: str,
+    uname: str,
+    description: Optional[str],
+) -> str:
+    if description:
+        desc_block = t("sell.summary_description", desc=description)
+    else:
+        desc_block = t("sell.summary_no_description")
+    return t(
+        "sell.summary",
+        amount=amount,
+        currency_label=_currency_label(code),
+        display_name=display_name,
+        uname=uname,
+        description_block=desc_block,
     )
 
 
@@ -125,6 +163,7 @@ async def sell_entry(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         return ConversationHandler.END
     context.user_data.pop("sell_amount", None)
     context.user_data.pop("sell_currency", None)
+    context.user_data.pop("sell_description", None)
     await query.message.reply_text(
         t("sell.amount_prompt"),
         reply_markup=with_back_to_main(InlineKeyboardMarkup([])),
@@ -196,15 +235,109 @@ async def sell_currency_chosen(update: Update, context: ContextTypes.DEFAULT_TYP
         if query.from_user.username
         else t("sell.username_none")
     )
-    summary = t(
-        "sell.summary",
-        amount=amount,
-        currency_label=_currency_label(code),
-        display_name=display_name,
-        uname=uname,
+    await query.message.reply_text(
+        t("sell.description_prompt", max=MAX_DESCRIPTION_LEN),
+        reply_markup=_description_keyboard(),
     )
-    await query.message.reply_text(summary, reply_markup=_confirm_keyboard())
+    return SELL_DESCRIPTION
+
+
+async def sell_description_skip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    if query is None or query.message is None or query.from_user is None:
+        return ConversationHandler.END
+    end = await _end_sell_if_not_member(update, context)
+    if end is not None:
+        await query.answer()
+        return end
+    await query.answer()
+    amount = context.user_data.get("sell_amount")
+    code = context.user_data.get("sell_currency")
+    if not isinstance(amount, int) or not isinstance(code, str):
+        await query.message.reply_text(
+            t("error.amount_lost"),
+            reply_markup=main_menu_keyboard(),
+        )
+        context.user_data.clear()
+        return ConversationHandler.END
+    context.user_data["sell_description"] = None
+    display_name = query.from_user.full_name or t("sell.display_fallback")
+    uname = (
+        f"@{query.from_user.username}"
+        if query.from_user.username
+        else t("sell.username_none")
+    )
+    await query.message.reply_text(
+        _sell_summary_text(
+            amount=amount,
+            code=code,
+            display_name=display_name,
+            uname=uname,
+            description=None,
+        ),
+        reply_markup=_confirm_keyboard(),
+    )
     return SELL_CONFIRM
+
+
+async def sell_receive_description(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    end = await _end_sell_if_not_member(update, context)
+    if end is not None:
+        return end
+    if update.message is None:
+        return SELL_DESCRIPTION
+    raw = update.message.text or ""
+    text = raw.strip()
+    if not text:
+        await update.message.reply_text(
+            t("sell.description_empty"),
+            reply_markup=_description_keyboard(),
+        )
+        return SELL_DESCRIPTION
+    if len(text) > MAX_DESCRIPTION_LEN:
+        await update.message.reply_text(
+            t("sell.description_too_long", max=MAX_DESCRIPTION_LEN),
+            reply_markup=_description_keyboard(),
+        )
+        return SELL_DESCRIPTION
+    amount = context.user_data.get("sell_amount")
+    code = context.user_data.get("sell_currency")
+    if not isinstance(amount, int) or not isinstance(code, str):
+        await update.message.reply_text(
+            t("error.amount_lost"),
+            reply_markup=main_menu_keyboard(),
+        )
+        context.user_data.clear()
+        return ConversationHandler.END
+    context.user_data["sell_description"] = text
+    u = update.effective_user
+    display_name = (u.full_name if u else None) or t("sell.display_fallback")
+    uname = (
+        f"@{u.username}" if u and u.username else t("sell.username_none")
+    )
+    await update.message.reply_text(
+        _sell_summary_text(
+            amount=amount,
+            code=code,
+            display_name=display_name,
+            uname=uname,
+            description=text,
+        ),
+        reply_markup=_confirm_keyboard(),
+    )
+    return SELL_CONFIRM
+
+
+async def sell_description_reminder(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    end = await _end_sell_if_not_member(update, context)
+    if end is not None:
+        return end
+    if update.message:
+        await update.message.reply_text(
+            t("sell.description_reminder", max=MAX_DESCRIPTION_LEN),
+            reply_markup=_description_keyboard(),
+        )
+    return SELL_DESCRIPTION
 
 
 async def sell_confirm_reminder(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -212,10 +345,35 @@ async def sell_confirm_reminder(update: Update, context: ContextTypes.DEFAULT_TY
     if end is not None:
         return end
     if update.message:
-        await update.message.reply_text(
-            t("sell.confirm_reminder"),
-            reply_markup=_confirm_keyboard(),
-        )
+        amount = context.user_data.get("sell_amount")
+        code = context.user_data.get("sell_currency")
+        desc = context.user_data.get("sell_description")
+        u = update.effective_user
+        if (
+            isinstance(amount, int)
+            and isinstance(code, str)
+            and u is not None
+            and (desc is None or isinstance(desc, str))
+        ):
+            display_name = u.full_name or t("sell.display_fallback")
+            uname = (
+                f"@{u.username}" if u.username else t("sell.username_none")
+            )
+            await update.message.reply_text(
+                _sell_summary_text(
+                    amount=amount,
+                    code=code,
+                    display_name=display_name,
+                    uname=uname,
+                    description=desc if desc else None,
+                ),
+                reply_markup=_confirm_keyboard(),
+            )
+        else:
+            await update.message.reply_text(
+                t("sell.confirm_reminder"),
+                reply_markup=_confirm_keyboard(),
+            )
     return SELL_CONFIRM
 
 
@@ -257,6 +415,8 @@ async def sell_submit_or_abort(update: Update, context: ContextTypes.DEFAULT_TYP
             context.user_data.clear()
             return ConversationHandler.END
         display_name = u.full_name or (db_user.first_name or "—")
+        desc_raw = context.user_data.get("sell_description")
+        description = desc_raw if isinstance(desc_raw, str) else None
         try:
             offer = await sell_offers_service.create_sell_offer(
                 session,
@@ -266,6 +426,7 @@ async def sell_submit_or_abort(update: Update, context: ContextTypes.DEFAULT_TYP
                 seller_display_name=display_name,
                 amount=amount,
                 currency=currency,
+                description=description,
             )
         except ValueError as e:
             logger.warning("sell offer validation: %s", e)
@@ -304,6 +465,7 @@ async def sell_submit_or_abort(update: Update, context: ContextTypes.DEFAULT_TYP
 async def sell_conversation_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     context.user_data.pop("sell_amount", None)
     context.user_data.pop("sell_currency", None)
+    context.user_data.pop("sell_description", None)
     if update.message:
         await update.message.reply_text(
             t("sell.cancelled_cmd"),
@@ -319,6 +481,7 @@ async def sell_buy_flow_fallback(update: Update, context: ContextTypes.DEFAULT_T
         return ConversationHandler.END
     context.user_data.pop("sell_amount", None)
     context.user_data.pop("sell_currency", None)
+    context.user_data.pop("sell_description", None)
     from exchange_money_bot.bot.main import execute_buy_flow_callback
 
     await execute_buy_flow_callback(query, context.bot)
@@ -332,6 +495,7 @@ async def sell_menu_main(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     await query.answer()
     context.user_data.pop("sell_amount", None)
     context.user_data.pop("sell_currency", None)
+    context.user_data.pop("sell_description", None)
     from exchange_money_bot.bot.main import apply_home_screen
 
     await apply_home_screen(query, context.bot)
@@ -359,6 +523,11 @@ def build_sell_conversation_handler() -> ConversationHandler:
                     pattern=r"^sell:ccy:(EUR|USD)$",
                 ),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, sell_currency_reminder),
+            ],
+            SELL_DESCRIPTION: [
+                CallbackQueryHandler(sell_description_skip, pattern=r"^sell:desc:skip$"),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, sell_receive_description),
+                MessageHandler(~filters.COMMAND, sell_description_reminder),
             ],
             SELL_CONFIRM: [
                 CallbackQueryHandler(
